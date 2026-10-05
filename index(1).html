@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Humedad del suelo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#e8eee9; --card:#f7faf7; --ink:#16302a; --mut:#5d756c; --line:#cfdad3;
+  --seco:#b9741b; --ok:#2f8f6b; --agua:#1f7fbf; --tubo:#dfe8e2;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0e1916; --card:#16241f; --ink:#e6f0ea; --mut:#8aa59a; --line:#27403a; --tubo:#1d302a;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,sans-serif;
+  min-height:100vh;padding:24px 16px;display:flex;justify-content:center}
+main{width:100%;max-width:760px}
+h1{font-size:1.4rem;font-weight:600;margin:0 0 4px}
+.sub{color:var(--mut);margin:0 0 20px;font-size:.95rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px}
+.top{display:flex;gap:32px;align-items:center}
+.tubo-wrap{position:relative;flex:none;padding-right:34px}
+.tubo{width:92px;height:280px;border-radius:46px;background:var(--tubo);border:2px solid var(--line);
+  overflow:hidden;position:relative}
+.fill{position:absolute;left:0;right:0;bottom:0;height:0%;background:var(--ok);transition:height .9s ease,background .4s}
+.marca{position:absolute;left:0;right:0;border-top:2px dashed var(--mut);opacity:.55}
+.marca span{position:absolute;right:-30px;top:-10px;font-size:.78rem;color:var(--mut)}
+.info{flex:1;min-width:0}
+.estado{font-size:2.2rem;font-weight:800;line-height:1.1;margin:0}
+.pct{font-size:1.2rem;color:var(--mut);margin:8px 0 18px}
+.pct b{color:var(--ink);font-size:1.6rem}
+.meta{color:var(--mut);font-size:.9rem;line-height:1.6;margin:0}
+.aviso{margin-top:14px;padding:10px 12px;border-radius:10px;background:#b9741b22;color:var(--seco);font-size:.9rem;display:none}
+.card+.card{margin-top:16px}
+h2{font-size:1rem;font-weight:600;margin:0 0 12px}
+svg{width:100%;height:auto;display:block}
+.eje{fill:var(--mut);font-size:11px;font-family:inherit}
+@media (max-width:520px){
+  .top{flex-direction:column;align-items:flex-start;gap:20px}
+  .estado{font-size:1.8rem}
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Humedad del suelo</h1>
+  <p class="sub">Datos en vivo desde el ESP32</p>
+
+  <section class="card top">
+    <div class="tubo-wrap">
+      <div class="tubo">
+        <div class="fill" id="fill"></div>
+        <div class="marca" style="bottom:30%"><span>30%</span></div>
+        <div class="marca" style="bottom:70%"><span>70%</span></div>
+      </div>
+    </div>
+    <div class="info">
+      <p class="estado" id="estado">Cargando…</p>
+      <p class="pct"><b id="pct">--</b>% de humedad</p>
+      <p class="meta" id="meta"></p>
+      <div class="aviso" id="aviso"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Últimas lecturas</h2>
+    <div id="grafica"></div>
+  </section>
+</main>
+
+<script>
+/* ====== CONFIGURA ESTO ====== */
+const CHANNEL_ID = "3522018";   // aparece en la página de tu canal de ThingSpeak
+const READ_KEY   = "";                // solo si el canal es privado (la clave quedará visible en el código)
+const LECTURAS   = 60;                // cuántas lecturas mostrar en la gráfica
+const REFRESCO   = 20000;             // ms entre actualizaciones
+/* ============================ */
+
+const $ = id => document.getElementById(id);
+const hora = d => d.toLocaleTimeString("es-CO", {hour:"2-digit", minute:"2-digit"});
+
+function clasificar(h){
+  if (h < 30) return {txt:"Muy seco",        color:"var(--seco)"};
+  if (h > 70) return {txt:"Mucha agua",      color:"var(--agua)"};
+  return            {txt:"Humedad normal",   color:"var(--ok)"};
+}
+
+function graficar(pts){
+  const W=600, H=200, L=32, R=8, T=8, B=24;
+  const x = i => L + (pts.length < 2 ? 0 : i*(W-L-R)/(pts.length-1));
+  const y = v => T + (100-v)*(H-T-B)/100;
+  const camino = pts.map((p,i)=>`${i?"L":"M"}${x(i).toFixed(1)},${y(p.h).toFixed(1)}`).join(" ");
+  const col = clasificar(pts[pts.length-1].h).color;
+  $("grafica").innerHTML = `
+  <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Historial de humedad">
+    <rect x="${L}" y="${y(100)}" width="${W-L-R}" height="${y(70)-y(100)}" fill="var(--agua)" opacity=".10"/>
+    <rect x="${L}" y="${y(30)}"  width="${W-L-R}" height="${y(0)-y(30)}"  fill="var(--seco)" opacity=".10"/>
+    ${[0,30,70,100].map(v=>`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/>
+      <text class="eje" x="${L-6}" y="${y(v)+4}" text-anchor="end">${v}</text>`).join("")}
+    <path d="${camino}" fill="none" stroke="${col}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(pts.length-1)}" cy="${y(pts[pts.length-1].h)}" r="4.5" fill="${col}"/>
+    <text class="eje" x="${L}" y="${H-6}">${hora(pts[0].t)}</text>
+    <text class="eje" x="${W-R}" y="${H-6}" text-anchor="end">${hora(pts[pts.length-1].t)}</text>
+  </svg>`;
+}
+
+function pintar(pts){
+  const u = pts[pts.length-1];
+  const e = clasificar(u.h);
+  $("estado").textContent = e.txt;
+  $("estado").style.color = e.color;
+  $("pct").textContent = Math.round(u.h);
+  $("fill").style.height = u.h + "%";
+  $("fill").style.background = e.color;
+  $("meta").textContent = `Última lectura: ${u.t.toLocaleString("es-CO")} · valor del sensor: ${u.c}`;
+
+  const edad = Date.now() - u.t.getTime();
+  const aviso = $("aviso");
+  if (edad > 3*60*1000){
+    aviso.style.display = "block";
+    aviso.textContent = "El sensor no envía datos desde hace varios minutos. Revisa que el ESP32 esté encendido y con WiFi.";
+  } else aviso.style.display = "none";
+
+  graficar(pts);
+}
+
+async function cargar(){
+  try{
+    const url = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?results=${LECTURAS}` +
+                (READ_KEY ? `&api_key=${READ_KEY}` : "");
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    const pts = d.feeds.filter(f => f.field1 !== null)
+      .map(f => ({t:new Date(f.created_at), h:parseFloat(f.field1), c:parseFloat(f.field2)}));
+    if (!pts.length) throw new Error("vacio");
+    pintar(pts);
+  }catch(err){
+    $("estado").textContent = "Sin datos";
+    $("estado").style.color = "var(--mut)";
+    $("meta").textContent = "No se pudieron leer los datos. Revisa el Channel ID y que el canal sea público.";
+  }
+}
+
+cargar();
+setInterval(cargar, REFRESCO);
+</script>
+</body>
+</html>
